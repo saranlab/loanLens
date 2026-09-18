@@ -1,69 +1,48 @@
 # LoanLens
 
-A credit scorecard built on the *Give Me Some Credit* dataset: binned features,
-WoE transformation, logistic regression, and a PDO-scaled score, with the
-reasoning for each decision written down rather than assumed.
+A credit scorecard on the *Give Me Some Credit* dataset: WoE binning, logistic
+regression, PDO-scaled points, and adverse action reasons. Target is
+`SeriousDlqin2yrs`, whether a borrower went 90+ days delinquent within two years.
+150,000 rows, 6.68% bad rate.
 
-Target is `SeriousDlqin2yrs`, whether a borrower went 90+ days delinquent within
-two years. 150,000 training rows, 6.68% bad rate.
+The dataset is well worn. What is less common is that **four steps of the standard
+recipe for it turn out to be wrong**, and this repo shows the number behind each
+one rather than following the recipe.
 
-## Status
+| Standard advice | What the data says |
+|---|---|
+| Cap utilization above 1.0, since a ratio cannot exceed 1 | Utilization between 1 and 2 has a **40.1%** bad rate against **19.4%** just below 1.0. Capping there prices 2,950 borrowers at half their real risk. The actual errors sit above 13: **5.9%** bad, *below* the 6.7% portfolio average |
+| Impute missing income with the median | Missing income carries a **lower** bad rate than present income (5.61% vs 6.95%), so the gap is itself a signal. WoE binning gives it its own bin, and no imputation is needed anywhere in the pipeline |
+| Treat IV above 0.5 as leakage and drop it | Four features exceed 0.5. Dropping them leaves `age` at IV 0.26 as the strongest thing remaining. Bureau history is known at application time, so it is not leakage. The test is a question about timing, not a threshold |
+| Put tier A at 720 points | On a 600 = 50:1 scale with PDO 20, 720 needs a PD of 0.03%. The safest applicant here scores 630, so tier A would be empty. Tiers are defined by the PD they stand for and the cutoffs derived from the scale |
 
-- [x] EDA and data quality analysis (`notebook/exploratory_data_analysis.ipynb`)
-- [x] Preprocessing module extracted from the notebook
-- [x] Binning, WoE, logistic regression, PDO scorecard
-- [ ] FastAPI scoring service
-- [ ] Streamlit reviewer interface
-- [ ] Docker Compose
+Two things the dataset documentation does not mention:
 
-## Getting the data
+**The delinquency counters carry status codes.** 269 rows hold 96 or 98 in all
+three counters at once, with nothing at all between 13 and 96. Their bad rate is
+**54.7%**, eight times the average, which makes the code itself the strongest
+single signal in the data. Left as counts, a model reads them as 98 late payments.
 
-The CSVs are not in the repo. Download them from
-[Give Me Some Credit](https://www.kaggle.com/c/GiveMeSomeCredit/data) and place
-them like this:
-
-```
-data/raw/cs-training.csv
-data/test/cs-test.csv
-```
-
-## Setup
-
-```bash
-python -m venv .venv
-source .venv/Scripts/activate   # Windows; use .venv/bin/activate on Linux/macOS
-pip install -r requirements.txt
-```
-
-Read the analysis:
-
-```bash
-jupyter lab notebook/exploratory_data_analysis.ipynb
-```
-
-Fit the scorecard and write `artifacts/scorecard.joblib`:
-
-```bash
-python -m src.train
-pytest -q
-```
+**`DebtRatio` holds two different units.** Of the 28,877 rows above 10, 26,771
+(**92.7%**) also have no income. With no denominator available the source system
+recorded a monthly amount instead of a ratio, so the column is split in two rather
+than capped.
 
 ## Results
 
-Held-out test set, 30,018 rows:
+Held-out test set of 30,018 rows, fit on the other 119,982:
 
 | Metric | Test | Train | 5-fold CV |
 |---|---|---|---|
-| AUC | 0.8556 | 0.8596 | 0.8591 +/- 0.0036 |
+| AUC | **0.8556** | 0.8596 | 0.8591 +/- 0.0036 |
 | Gini | 0.7111 | 0.7193 | |
 | KS | 0.5583 | 0.5612 | |
 
-The train/test gap is 0.004 and the CV spread is 0.0036, so the holdout figure is
-not a lucky split.
+The train/test gap is 0.004 and the CV spread 0.0036, so the holdout figure is not
+a lucky split.
 
-Risk tiers are stated as the default probability they stand for, and the score
-cutoffs are derived from the PDO scale rather than picked. On the test set they
-hold up:
+Risk tiers state the default probability they stand for, and their score cutoffs
+come out of the PDO formula. On the test set they hold:
 
 | Tier | Promise | Cutoff | Share | Observed bad rate |
 |---|---|---|---|---|
@@ -72,52 +51,90 @@ hold up:
 | C | the rest | | 30.1% | 18.11% |
 
 Scaling is 600 points at 50:1 good:bad odds with 20 points per doubling, so 620
-is 100:1 and 640 is 200:1. The original plan put tier A at 720, which on this
-scale needs a PD of 0.03%; no applicant in this portfolio is that safe, so the
-tier would have been empty.
+reads as 100:1 and 640 as 200:1.
 
-## What the EDA found
+## Running it
 
-Four things that change how the data has to be handled:
+The CSVs are not in the repo. Download them from
+[Give Me Some Credit](https://www.kaggle.com/c/GiveMeSomeCredit/data) into
+`data/raw/cs-training.csv` and `data/test/cs-test.csv`.
 
-**The delinquency counters use status codes.** 269 rows hold 96 or 98 in all
-three counters at once, with nothing between 13 and 96. These are bureau status
-codes, not counts. Their bad rate is 54.7%, eight times the overall rate, so the
-value becomes NaN and the signal is kept as a flag.
+```bash
+python -m venv .venv
+source .venv/Scripts/activate   # Windows; .venv/bin/activate elsewhere
+pip install -r requirements.txt
 
-**`DebtRatio` holds two different units.** Of the 28,877 rows above 10, 26,771
-(92.7%) also have no income. With no denominator to divide by, the source system
-recorded a monthly amount instead of a ratio. The column is split in two,
-switched by an income-missing flag.
+python -m src.train      # fits the scorecard, writes artifacts/scorecard.joblib
+pytest -q                # 68 tests, no dataset needed
+```
 
-**Capping utilization at 1.0 would be wrong.** Utilization between 1 and 2 has a
-40.1% bad rate against 19.4% just below 1.0, so exceeding a credit limit is real
-risk rather than a data error. Values above 13 are the errors: their bad rate is
-5.9%, below the portfolio average.
+The analysis is in `notebook/exploratory_data_analysis.ipynb`, committed with its
+outputs so it reads on GitHub without the data.
 
-**Four features have IV above 0.5.** The usual reading is to suspect leakage, but
-payment history and utilization are bureau facts known at application time.
-Dropping all four would leave `age` at IV 0.26 as the strongest remaining
-feature. `NumberOfTimes90DaysLate` is the one open question: its definition
-states no time window while the other two counters state "in the last 2 years".
+## How leakage is kept out
+
+The split comes first. Everything fitted afterwards sees training rows only, and
+the test set is touched once, by `transform`, to be scored.
+
+`preprocessing.py` is stateless on purpose: no row's output depends on any other
+row, so it is safe to run before the split. Two tests assert that by cleaning a
+subset and comparing against cleaning everything and then subsetting.
+
+Anything estimated from data lives in `binning.py`. Bin membership comes from fixed
+edges, but the WoE attached to each bin is computed from the target, which is what
+makes the ordering matter. A test encodes the same test rows twice, once with a
+binner fit on train alone and once with one fit on the pool, and asserts the
+results differ.
+
+Cross-validation refits the binner inside each fold rather than reusing one fit
+from outside the loop.
+
+## Two routes to the same score
+
+`Scorecard.score()` goes through the model. `Scorecard.score_from_points()` sums
+the points table a human would read. `python -m src.train` fails if they disagree.
+
+In production the points table often *is* the model: a credit officer or a core
+banking system adds up points from a table, not a pickled estimator. If the two
+drift apart, the validated model is not the thing deciding, and the reasons given
+for a decline are fiction.
 
 ## Layout
 
 ```
-data/raw/          cs-training.csv (gitignored)
-data/test/         cs-test.csv (gitignored)
-notebook/          exploratory data analysis
-src/config.py      thresholds, bin edges, scorecard parameters
-src/preprocessing  cleaning and derived features, stateless
-src/binning.py     WoE encoding, fit on training rows only
-src/scorecard.py   coefficients to points, adverse action reasons
-src/evaluate.py    AUC, KS, Gini, calibration
-src/train.py       entry point
-tests/             68 tests, no dataset required
-artifacts/         serialized model (gitignored)
+notebook/            exploratory data analysis, with outputs
+src/config.py        thresholds, bin edges, scorecard parameters, all in one place
+src/preprocessing.py cleaning and derived features, stateless
+src/binning.py       WoE encoding, fit on training rows only
+src/scorecard.py     coefficients to points, adverse action reasons
+src/evaluate.py      AUC, KS, Gini, calibration
+src/train.py         entry point
+tests/               68 tests on synthetic frames, no dataset required
+data/, artifacts/    gitignored
 ```
 
-Everything that has to be estimated from data lives in `binning.py` and is fit
-inside the training fold. `preprocessing.py` is stateless by design, with tests
-asserting that cleaning a subset matches cleaning everything and then subsetting,
-which is what makes it safe to run before the split.
+## Known limits
+
+**No out-of-time validation.** PSI between train and test is under 0.001, but that
+reflects a random split of one population, not two time periods. The dataset has no
+date column, so whether the model survives change over time cannot be tested here,
+and that is the main risk for a deployed credit model.
+
+**`NumberOfTimes90DaysLate` has no stated time window**, while the 30-59 and 60-89
+counters both say "in the last 2 years". Read literally it is a lifetime count. The
+observed bad rates, 33.7% at one event rising to 61.7% at three or more rather than
+near 100%, say it does not overlap the target period, but that rests on inference
+rather than documentation. It is the second strongest feature, so for production
+this is a question for whoever owns the data.
+
+**`age` is in the model** at IV 0.26, and it is a protected attribute in many
+jurisdictions. Whether to use it is a policy decision rather than a modelling one.
+
+## Status
+
+- [x] EDA and data quality analysis
+- [x] Preprocessing extracted from the notebook, with tests
+- [x] WoE binning, logistic regression, PDO scorecard
+- [ ] Gradient boosting baseline, to price what staying interpretable costs
+- [ ] Approval cutoff analysis against a loss assumption
+- [ ] FastAPI scoring service, Streamlit reviewer UI, Docker Compose
