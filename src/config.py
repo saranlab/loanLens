@@ -109,6 +109,14 @@ BASE_SCORE = 600.0
 BASE_ODDS = 50.0
 PDO = 20.0
 
-# Score cutoffs for the risk tiers the API reports.
-TIER_CUTOFFS = [(720, "A"), (620, "B")]
+# Risk tiers, defined by the default probability they stand for rather than by a
+# round number of points. The plan this project started from proposed A at 720
+# and B at 620, which came from the FICO range, not from this scale: at 600 = 50:1
+# and PDO 20, reaching 720 needs odds of 50 * 2**6 = 3200:1, a PD of 0.03%. No
+# applicant in this portfolio is that safe, so tier A would have been empty.
+#
+# Stating the PD boundary instead makes the tier mean something, and the cutoff
+# points fall out of the scaling formula. src.scorecard.tier_cutoffs() does the
+# conversion so the two can never drift apart.
+TIER_MAX_PD = [(0.01, "A"), (0.05, "B")]
 TIER_FLOOR = "C"
