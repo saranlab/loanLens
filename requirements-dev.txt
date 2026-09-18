@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Test suite and the tooling that executes the notebook with its outputs.
+pytest>=8.0
+nbformat>=5.9
+nbclient>=0.9
