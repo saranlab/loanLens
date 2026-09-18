@@ -31,14 +31,21 @@ UTIL_INVALID_ABOVE = 13.0
 
 MIN_AGE = 18
 
-# Bin edges from the bad-rate-per-bin analysis in section 7. Chosen so that each
-# bin has a reason (0.9 and 1.0 bracket the credit limit; the age bands are
-# five-year steps where the bad rate actually moves) and no bin is too thin to
-# estimate. Values outside the outer edges cannot occur because the edges are
-# unbounded, which keeps transform() safe on unseen data.
+# Bin edges from the bad-rate-per-bin analysis in section 7. Each edge has a
+# reason: 0.9 and 1.0 bracket the credit limit, the age bands are five-year steps
+# over the range where the bad rate actually moves. The outer edges are unbounded,
+# so no value can fall outside the bins and transform() stays safe on data it has
+# not seen. Where the source analysis split a tail too finely, the bins are merged
+# here rather than left to break monotonicity on a handful of rows.
 BIN_EDGES: dict[str, list[float]] = {
-    "RevolvingUtilizationOfUnsecuredLines": [-np.inf, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0, 2.0, np.inf],
-    "age": [-np.inf, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, np.inf],
+    # Everything over the credit limit is one bin. Splitting at 2.0 left only 105
+    # training rows above it, and that bin's bad rate came out *below* the bin
+    # beneath it, which broke monotonicity on noise rather than on signal.
+    "RevolvingUtilizationOfUnsecuredLines": [-np.inf, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0, np.inf],
+    # Under 30 is one bin. The bad rate peaks at 25-30 (11.35%) rather than at the
+    # youngest band (11.00%), so splitting there is not monotonic. Merging is
+    # honest about it and "under 30" is a band a credit officer already thinks in.
+    "age": [-np.inf, 30, 35, 40, 45, 50, 55, 60, 65, 70, np.inf],
     "debt_ratio": [-np.inf, 0.2, 0.4, 0.6, 0.8, 1.0, 2.0, np.inf],
     "MonthlyIncome": [-np.inf, 1500, 3000, 4500, 6000, 8000, 11000, np.inf],
     "NumberOfOpenCreditLinesAndLoans": [-np.inf, 2, 4, 6, 8, 11, 15, np.inf],
@@ -83,6 +90,14 @@ MODEL_FEATURES = [
 
 # Haldane correction, so a bin with no bads gives a finite WoE instead of -inf.
 WOE_EPS = 0.5
+
+# A bin below this many training rows is scored at the portfolio average instead
+# of getting its own estimate. At a 6.7% base rate, 100 rows hold about 7 bads,
+# which is already a shaky rate estimate; below that the number is noise. The
+# usual scorecard convention asks for 5% of the population per bin, which the
+# tail of a strong feature cannot deliver, so this is a floor rather than a
+# target. Thin bins are reported by WoEBinner.thin_bins_ either way.
+MIN_BIN_COUNT = 100
 
 # Drop a feature below this IV. 0.02 is the conventional floor for "carries
 # anything at all".
