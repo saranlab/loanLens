@@ -10,8 +10,8 @@ two years. 150,000 training rows, 6.68% bad rate.
 ## Status
 
 - [x] EDA and data quality analysis (`notebook/exploratory_data_analysis.ipynb`)
-- [ ] Preprocessing module extracted from the notebook
-- [ ] Binning, WoE, logistic regression, PDO scorecard
+- [x] Preprocessing module extracted from the notebook
+- [x] Binning, WoE, logistic regression, PDO scorecard
 - [ ] FastAPI scoring service
 - [ ] Streamlit reviewer interface
 - [ ] Docker Compose
@@ -33,8 +33,48 @@ data/test/cs-test.csv
 python -m venv .venv
 source .venv/Scripts/activate   # Windows; use .venv/bin/activate on Linux/macOS
 pip install -r requirements.txt
+```
+
+Read the analysis:
+
+```bash
 jupyter lab notebook/exploratory_data_analysis.ipynb
 ```
+
+Fit the scorecard and write `artifacts/scorecard.joblib`:
+
+```bash
+python -m src.train
+pytest -q
+```
+
+## Results
+
+Held-out test set, 30,018 rows:
+
+| Metric | Test | Train | 5-fold CV |
+|---|---|---|---|
+| AUC | 0.8556 | 0.8596 | 0.8591 +/- 0.0036 |
+| Gini | 0.7111 | 0.7193 | |
+| KS | 0.5583 | 0.5612 | |
+
+The train/test gap is 0.004 and the CV spread is 0.0036, so the holdout figure is
+not a lucky split.
+
+Risk tiers are stated as the default probability they stand for, and the score
+cutoffs are derived from the PDO scale rather than picked. On the test set they
+hold up:
+
+| Tier | Promise | Cutoff | Share | Observed bad rate |
+|---|---|---|---|---|
+| A | under 1% PD | 620 | 5.5% | 0.48% |
+| B | under 5% PD | 572 | 64.4% | 1.87% |
+| C | the rest | | 30.1% | 18.11% |
+
+Scaling is 600 points at 50:1 good:bad odds with 20 points per doubling, so 620
+is 100:1 and 640 is 200:1. The original plan put tier A at 720, which on this
+scale needs a PD of 0.03%; no applicant in this portfolio is that safe, so the
+tier would have been empty.
 
 ## What the EDA found
 
@@ -67,6 +107,17 @@ states no time window while the other two counters state "in the last 2 years".
 data/raw/          cs-training.csv (gitignored)
 data/test/         cs-test.csv (gitignored)
 notebook/          exploratory data analysis
-src/               preprocessing and model code
+src/config.py      thresholds, bin edges, scorecard parameters
+src/preprocessing  cleaning and derived features, stateless
+src/binning.py     WoE encoding, fit on training rows only
+src/scorecard.py   coefficients to points, adverse action reasons
+src/evaluate.py    AUC, KS, Gini, calibration
+src/train.py       entry point
+tests/             68 tests, no dataset required
 artifacts/         serialized model (gitignored)
 ```
+
+Everything that has to be estimated from data lives in `binning.py` and is fit
+inside the training fold. `preprocessing.py` is stateless by design, with tests
+asserting that cleaning a subset matches cleaning everything and then subsetting,
+which is what makes it safe to run before the split.
