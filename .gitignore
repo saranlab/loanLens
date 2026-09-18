@@ -1,0 +1,57 @@
+# ----------------------
+# Data files
+# ----------------------
+data/raw/*
+!data/raw/.gitkeep
+
+data/test/*
+!data/test/.gitkeep
+
+data/processed/*
+!data/processed/.gitkeep
+
+data/interim/*
+!data/interim/.gitkeep
+
+# ----------------------
+# Artifacts & Models
+# ----------------------
+artifacts/*
+!artifacts/.gitkeep
+
+saved_models/*
+!saved_models/.gitkeep
+
+# ----------------------
+# Environment & Secrets
+# ----------------------
+.env
+*.env
+
+# ----------------------
+# Jupyter & Notebooks
+# ----------------------
+.ipynb_checkpoints/
+
+# ----------------------
+# Python cache & build
+# ----------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+
+# ----------------------
+# Logs
+# ----------------------
+logs/*
+!logs/.gitkeep
+
+# ----------------------
+# System files
+# ----------------------
+.DS_Store
+Thumbs.db
