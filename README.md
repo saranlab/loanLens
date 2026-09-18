@@ -1,5 +1,7 @@
 # LoanLens
 
+[![tests](https://github.com/saranlab/loanLens/actions/workflows/tests.yml/badge.svg)](https://github.com/saranlab/loanLens/actions/workflows/tests.yml)
+
 A credit scorecard on the *Give Me Some Credit* dataset: WoE binning, logistic
 regression, PDO-scaled points, and adverse action reasons. Target is
 `SeriousDlqin2yrs`, whether a borrower went 90+ days delinquent within two years.
@@ -53,6 +55,49 @@ come out of the PDO formula. On the test set they hold:
 Scaling is 600 points at 50:1 good:bad odds with 20 points per doubling, so 620
 reads as 100:1 and 640 as 200:1.
 
+### What staying interpretable costs
+
+LightGBM on the same split, given raw values and the features the scorecard drops
+for explainability:
+
+| Model | AUC | Gini | KS |
+|---|---|---|---|
+| LightGBM | 0.8636 | 0.7271 | 0.5803 |
+| Scorecard | 0.8556 | 0.7111 | 0.5583 |
+| **Gap** | **0.0080** | 0.0160 | 0.0220 |
+
+0.94% of AUC, against a seed-to-seed spread of 0.0004 for the tree itself, so the
+gap is real and small. Where it comes from is the interesting part: `weighted_late`
+takes 39.8% of the tree's gain and `total_late` another 16.1%, which are precisely
+the two features `config.py` excludes because "weighted delinquency index" is not
+something a declined applicant can be told. The 0.0080 is the price of that
+decision, and it is now quoted rather than guessed at.
+
+### Where to set the approval cutoff
+
+AUC ranks applicants but says nothing about where to draw the line. Approving pays
+when `(1 - p) * margin > p * loss`, so the threshold is `p < margin / (margin + loss)`.
+
+At an assumed 8% margin and 60% loss given default, that break-even PD is 11.76%,
+a cutoff of 545. Sweeping the test set puts the optimum at 550: approve 85.5% with
+2.9% bad among those approved.
+
+| Cutoff | Approval rate | Bad rate approved | Profit per application |
+|---|---|---|---|
+| 500 | 96.5% | 5.03% | 442 |
+| 540 | 89.7% | 3.42% | 509 |
+| **550** | **85.5%** | **2.91%** | **515** |
+| 572 (tier B floor) | 69.9% | 1.76% | 475 |
+| 600 | 39.4% | 0.91% | 291 |
+
+Using the tier B floor as the approval line costs 39.5 per application, 7.7%. A
+tier states a risk level; a cutoff trades margin against loss. Different questions.
+
+Every figure there rests on the margin and loss assumptions, so `src/policy.py`
+sweeps the loss-to-margin ratio from 2.5 to 25 and the optimal cutoff moves from
+516 to 584. The honest answer to "where should the cutoff be" is that it moves
+with your loss ratio.
+
 ## Running it
 
 The CSVs are not in the repo. Download them from
@@ -65,7 +110,9 @@ source .venv/Scripts/activate   # Windows; .venv/bin/activate elsewhere
 pip install -r requirements.txt
 
 python -m src.train      # fits the scorecard, writes artifacts/scorecard.joblib
-pytest -q                # 68 tests, no dataset needed
+python -m src.baseline   # LightGBM comparison
+python -m src.policy     # approval cutoff economics
+pytest -q                # 84 tests, no dataset needed
 ```
 
 The analysis is in `notebook/exploratory_data_analysis.ipynb`, committed with its
@@ -108,8 +155,10 @@ src/preprocessing.py cleaning and derived features, stateless
 src/binning.py       WoE encoding, fit on training rows only
 src/scorecard.py     coefficients to points, adverse action reasons
 src/evaluate.py      AUC, KS, Gini, calibration
+src/baseline.py      LightGBM comparison
+src/policy.py        cutoff economics and sensitivity
 src/train.py         entry point
-tests/               68 tests on synthetic frames, no dataset required
+tests/               84 tests on synthetic frames, no dataset required
 data/, artifacts/    gitignored
 ```
 
@@ -135,6 +184,7 @@ jurisdictions. Whether to use it is a policy decision rather than a modelling on
 - [x] EDA and data quality analysis
 - [x] Preprocessing extracted from the notebook, with tests
 - [x] WoE binning, logistic regression, PDO scorecard
-- [ ] Gradient boosting baseline, to price what staying interpretable costs
-- [ ] Approval cutoff analysis against a loss assumption
+- [x] Gradient boosting baseline, to price what staying interpretable costs
+- [x] Approval cutoff analysis against a loss assumption
+- [x] CI running the test suite
 - [ ] FastAPI scoring service, Streamlit reviewer UI, Docker Compose
