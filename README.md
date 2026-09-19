@@ -162,9 +162,9 @@ sklearn, pandas and numpy, so the scoring container would carry the whole
 training stack and a library upgrade could stop the model loading.
 
 A fitted scorecard does not need any of that. It is a lookup: which bin does this
-value fall into, how many points does that bin carry. That is 12KB of JSON, which
-a risk reviewer can also read. `src/scoring.py` reads it and imports nothing
-outside the standard library, enforced by a test that parses the module.
+value fall into, how many points does that bin carry. That is an auditable 12KB
+declarative JSON artifact. `src/scoring.py` reads it and imports nothing
+outside the standard library, enforced by a test that parses the module AST.
 
 The cost is that binning exists twice, once for training and once for serving. A
 test scores every row both ways; on the real test set they agree to 1.14e-13
@@ -173,8 +173,8 @@ exceeds 1e-6.
 
 `/score` returns the decision with its reasons, because a declined applicant is
 owed them, and explanations bolted on later end up hand-written and drifting from
-the model. `/scorecard` publishes the points table itself: a decision nobody can
-check is not one anyone should be making about someone's credit.
+the model. `/scorecard` publishes the points table itself to guarantee full
+regulatory auditability and algorithmic transparency.
 
 ### What building the service found
 
@@ -209,7 +209,7 @@ src/train.py         entry point
 src/serving.py       builds the JSON export (needs pandas)
 src/scoring.py       reads it and scores (standard library only)
 api/                 FastAPI service, Pydantic validation, Dockerfile
-ui/                  Streamlit reviewer interface, Dockerfile
+ui/                  Streamlit underwriting cockpit, Dockerfile
 tests/               131 tests on synthetic frames, no dataset required
 data/, artifacts/    gitignored
 ```
@@ -240,5 +240,5 @@ jurisdictions. Whether to use it is a policy decision rather than a modelling on
 - [x] Approval cutoff analysis against a loss assumption
 - [x] CI running the test suite
 - [x] FastAPI scoring service with adverse action reasons
-- [x] Streamlit reviewer UI
+- [x] Streamlit underwriting cockpit
 - [x] Docker Compose

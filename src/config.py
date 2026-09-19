@@ -1,8 +1,8 @@
 """Thresholds, bin edges and scorecard parameters.
 
-Every number a reviewer might want to argue with lives here rather than inline
-in the pipeline. Section references point at `notebook/exploratory_data_analysis.ipynb`,
-which is where each value was derived.
+All operational thresholds, bin edges, and scorecard parameters are centralized
+here rather than declared inline. Section references correspond to
+`notebook/exploratory_data_analysis.ipynb`, where each value was empirically derived.
 """
 
 from __future__ import annotations

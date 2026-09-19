@@ -240,7 +240,7 @@ class TestScorecardEndpoint:
             assert all("points" in b for b in feature["bins"])
 
     def test_does_not_leak_raw_woe(self, client):
-        """Points are the unit a reviewer works in; WoE is an implementation detail."""
+        """Points represent the business-facing credit units; WoE is an internal parameter."""
         body = client.get("/scorecard").json()
         assert "woe" not in json.dumps(body)
 

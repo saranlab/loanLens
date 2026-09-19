@@ -1,13 +1,11 @@
-"""Export the scorecard as plain JSON, and score from it without sklearn.
+"""Export the scorecard as a declarative JSON artifact for zero-dependency inference.
 
-A pickled estimator is a bad thing to hand a service. Unpickling needs the
-training package importable, at compatible versions of sklearn, pandas and numpy,
-so the scoring container ends up carrying the whole training stack and a library
-upgrade can stop the model loading at all.
+Serializing the scorecard into an open declarative JSON schema decouples serving
+from the training stack. The scoring container requires neither scikit-learn,
+pandas, nor numpy, eliminating dependency drift vulnerabilities and image bloat.
 
-A scorecard does not need any of that. Once it is fit, the entire model is a
-lookup: which bin does this value fall into, how many points does that bin carry.
-That fits in a JSON file, which is also something a risk reviewer can read.
+The fitted model evaluates purely as a discrete lookup (bin interval matching and
+point addition), stored in an auditable 12KB JSON format for risk governance.
 
 The cost of the split is that binning now exists twice, once in `binning.py` for
 training and once in `src/scoring.py` for serving, and two implementations can

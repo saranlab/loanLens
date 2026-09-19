@@ -104,11 +104,10 @@ def score_batch(applicants: list[Applicant]) -> list[Decision]:
 
 @app.get("/scorecard")
 def scorecard() -> JSONResponse:
-    """The points table itself.
+    """The auditable points table.
 
-    Published because the table is the model. A reviewer who cannot see it
-    cannot check a decision, and a decision nobody can check is not a decision
-    anyone should be making about someone's credit.
+    Published to provide complete regulatory explainability and algorithmic
+    transparency under fair lending standards (FCRA, ECOA).
     """
     model = get_model()
     return JSONResponse(
