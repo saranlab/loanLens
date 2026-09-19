@@ -21,6 +21,7 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 
 from . import config as cfg
 from . import evaluate as ev
+from . import serving
 from .binning import WoEBinner
 from .preprocessing import add_features, clean, load_raw
 from .scorecard import Scorecard, tier_cutoffs, tier_for
@@ -189,6 +190,22 @@ def main(argv=None) -> int:
     )
     print(f"\nwrote {args.out.relative_to(ROOT)} "
           f"({args.out.stat().st_size / 1024:.0f} KB)")
+
+    # The JSON export is what the API serves. The pickle above stays for
+    # analysis work that wants the fitted objects back; the service never reads
+    # it, so no sklearn version has to match across the container boundary.
+    spec_path = args.out.with_name("scorecard.json")
+    serving.export(card, spec_path, metrics={"test": m_te,
+                                             "cv_auc_mean": float(cv_scores.mean())})
+    model = serving.ScoringModel.from_json(spec_path)
+    applicants = serving.frame_to_applicants(X_te, card.features)
+    json_scores = np.array([model.score(a) for a in applicants])
+    max_drift = float(np.max(np.abs(json_scores - card.score(X_te).to_numpy())))
+    if max_drift > 1e-6:
+        raise RuntimeError(f"json scorer drifts from the model by {max_drift}")
+    print(f"wrote {spec_path.relative_to(ROOT)} "
+          f"({spec_path.stat().st_size / 1024:.0f} KB), "
+          f"reproduces the model to {max_drift:.2e} points")
 
     report = args.out.with_suffix(".metrics.json")
     report.write_text(json.dumps({"train": m_tr, "test": m_te,
