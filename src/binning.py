@@ -46,6 +46,18 @@ def bin_labels(values: pd.Series, feature: str) -> pd.Series:
     return labels.astype(str)
 
 
+def expected_labels(feature: str) -> list[str] | None:
+    """Every label a fixed-edge feature can produce, in order.
+
+    Returns None for features whose bins come from the data rather than from
+    config, since those cannot be enumerated ahead of time.
+    """
+    if feature not in cfg.BIN_EDGES:
+        return None
+    intervals = pd.IntervalIndex.from_breaks(cfg.BIN_EDGES[feature], closed="right")
+    return [str(i) for i in intervals]
+
+
 class WoEBinner(BaseEstimator, TransformerMixin):
     """Replace each feature with the WoE of the bin its value falls into.
 
@@ -108,6 +120,23 @@ class WoEBinner(BaseEstimator, TransformerMixin):
         for feature in features:
             labels = bin_labels(X[feature], feature)
             grouped = y.groupby(labels).agg(n="size", bad="sum")
+
+            # groupby only yields bins that have rows. A configured bin with no
+            # training rows still has to exist, or the exported scorecard has a
+            # hole an applicant can fall into. Empty bins come back with n=0 and
+            # are pinned to the portfolio average by the min_bin_count rule below,
+            # which is the right answer: no data, no claim.
+            expected = expected_labels(feature)
+            if expected is not None:
+                absent = [b for b in expected if b not in grouped.index]
+                if absent:
+                    grouped = pd.concat(
+                        [grouped, pd.DataFrame({"n": 0, "bad": 0}, index=absent)]
+                    )
+                grouped = grouped.loc[
+                    expected + [i for i in grouped.index if i not in expected]
+                ]
+
             grouped["good"] = grouped["n"] - grouped["bad"]
 
             n_bins = len(grouped)
@@ -187,6 +216,10 @@ class WoEBinner(BaseEstimator, TransformerMixin):
         """
         check_is_fitted(self, "features_")
         table = self.tables_[feature].drop(index=MISSING, errors="ignore")
+        # A pinned bin carries no estimate, so it should not decide whether the
+        # curve runs in one direction.
+        pinned = self.thin_bins_.get(feature, [])
+        table = table.drop(index=[b for b in pinned if b in table.index], errors="ignore")
         if len(table) < 3:
             return None
         woe = table["woe"].to_numpy()

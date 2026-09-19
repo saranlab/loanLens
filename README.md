@@ -36,9 +36,9 @@ Held-out test set of 30,018 rows, fit on the other 119,982:
 
 | Metric | Test | Train | 5-fold CV |
 |---|---|---|---|
-| AUC | **0.8556** | 0.8596 | 0.8591 +/- 0.0036 |
-| Gini | 0.7111 | 0.7193 | |
-| KS | 0.5583 | 0.5612 | |
+| AUC | **0.8546** | 0.8590 | 0.8585 +/- 0.0037 |
+| Gini | 0.7092 | 0.7180 | |
+| KS | 0.5550 | 0.5576 | |
 
 The train/test gap is 0.004 and the CV spread 0.0036, so the holdout figure is not
 a lucky split.
@@ -63,10 +63,10 @@ for explainability:
 | Model | AUC | Gini | KS |
 |---|---|---|---|
 | LightGBM | 0.8636 | 0.7271 | 0.5803 |
-| Scorecard | 0.8556 | 0.7111 | 0.5583 |
-| **Gap** | **0.0080** | 0.0160 | 0.0220 |
+| Scorecard | 0.8546 | 0.7092 | 0.5550 |
+| **Gap** | **0.0090** | 0.0179 | 0.0253 |
 
-0.94% of AUC, against a seed-to-seed spread of 0.0004 for the tree itself, so the
+1.05% of AUC, against a seed-to-seed spread of 0.0004 for the tree itself, so the
 gap is real and small. Where it comes from is the interesting part: `weighted_late`
 takes 39.8% of the tree's gain and `total_late` another 16.1%, which are precisely
 the two features `config.py` excludes because "weighted delinquency index" is not
@@ -109,10 +109,18 @@ python -m venv .venv
 source .venv/Scripts/activate   # Windows; .venv/bin/activate elsewhere
 pip install -r requirements.txt
 
-python -m src.train      # fits the scorecard, writes artifacts/scorecard.joblib
+python -m src.train      # fits the scorecard, writes artifacts/scorecard.json
 python -m src.baseline   # LightGBM comparison
 python -m src.policy     # approval cutoff economics
-pytest -q                # 84 tests, no dataset needed
+pytest -q                # 131 tests, no dataset needed
+```
+
+Then serve it:
+
+```bash
+docker compose up --build
+# ui  http://localhost:8501
+# api http://localhost:8000/docs
 ```
 
 The analysis is in `notebook/exploratory_data_analysis.ipynb`, committed with its
@@ -146,6 +154,46 @@ banking system adds up points from a table, not a pickled estimator. If the two
 drift apart, the validated model is not the thing deciding, and the reasons given
 for a decline are fiction.
 
+## Serving it
+
+The trained artifact is exported as JSON, not as a pickle. Unpickling a fitted
+estimator needs the training package importable at compatible versions of
+sklearn, pandas and numpy, so the scoring container would carry the whole
+training stack and a library upgrade could stop the model loading.
+
+A fitted scorecard does not need any of that. It is a lookup: which bin does this
+value fall into, how many points does that bin carry. That is 12KB of JSON, which
+a risk reviewer can also read. `src/scoring.py` reads it and imports nothing
+outside the standard library, enforced by a test that parses the module.
+
+The cost is that binning exists twice, once for training and once for serving. A
+test scores every row both ways; on the real test set they agree to 1.14e-13
+points across 30,018 rows, and `src/train.py` refuses to finish if that ever
+exceeds 1e-6.
+
+`/score` returns the decision with its reasons, because a declined applicant is
+owed them, and explanations bolted on later end up hand-written and drifting from
+the model. `/scorecard` publishes the points table itself: a decision nobody can
+check is not one anyone should be making about someone's credit.
+
+### What building the service found
+
+`late_code_flag` had to come out of the model. It is set on exactly the rows
+where all three delinquency counters become NaN, so it is perfectly collinear
+with the counters' own missing bins. Fit together, the logistic split the effect
+between them and the flag's coefficient came out positive: its row in the points
+table said that belonging to a group with a 54.7% bad rate earns 68 points. The
+totals were right, since the counters' missing bins carried -118 between them,
+but the attribution was backwards. And because no application can carry a 96/98
+bureau code, every real applicant sat in the flag=0 bin and appeared to lose 68
+points on it, which made it the top adverse action reason for everybody.
+
+Dropping it costs 0.0010 AUC. `fit_scorecard` now refuses to return a model with
+any positive WoE coefficient, since that always means two features encode the
+same thing and the damage lands in the points table rather than in the metrics.
+
+This only surfaced once per-applicant attribution had to be shown to someone.
+
 ## Layout
 
 ```
@@ -158,7 +206,11 @@ src/evaluate.py      AUC, KS, Gini, calibration
 src/baseline.py      LightGBM comparison
 src/policy.py        cutoff economics and sensitivity
 src/train.py         entry point
-tests/               84 tests on synthetic frames, no dataset required
+src/serving.py       builds the JSON export (needs pandas)
+src/scoring.py       reads it and scores (standard library only)
+api/                 FastAPI service, Pydantic validation, Dockerfile
+ui/                  Streamlit reviewer interface, Dockerfile
+tests/               131 tests on synthetic frames, no dataset required
 data/, artifacts/    gitignored
 ```
 
@@ -187,4 +239,6 @@ jurisdictions. Whether to use it is a policy decision rather than a modelling on
 - [x] Gradient boosting baseline, to price what staying interpretable costs
 - [x] Approval cutoff analysis against a loss assumption
 - [x] CI running the test suite
-- [ ] FastAPI scoring service, Streamlit reviewer UI, Docker Compose
+- [x] FastAPI scoring service with adverse action reasons
+- [x] Streamlit reviewer UI
+- [x] Docker Compose

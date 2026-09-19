@@ -21,6 +21,7 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 
 from . import config as cfg
 from . import evaluate as ev
+from . import serving
 from .binning import WoEBinner
 from .preprocessing import add_features, clean, load_raw
 from .scorecard import Scorecard, tier_cutoffs, tier_for
@@ -97,6 +98,20 @@ def fit_scorecard(X_tr: pd.DataFrame, y_tr: pd.Series) -> tuple[Scorecard, WoEBi
     # large C because the features are already WoE encoded and few in number.
     model = LogisticRegression(C=1.0, max_iter=1000, random_state=cfg.RANDOM_STATE)
     model.fit(woe_tr, y_tr)
+
+    # WoE is ln(good/bad), so a higher value means safer and every coefficient
+    # must be negative. A positive one means two features are encoding the same
+    # thing and the fit has split the effect between them with opposite signs.
+    # The total still comes out right, which is why this needs an explicit check:
+    # the damage lands in the points table rather than in the metrics.
+    positive = {f: float(c) for f, c in zip(binner.features_, model.coef_.ravel()) if c > 0}
+    if positive:
+        raise ValueError(
+            f"positive WoE coefficients: {positive}. These features are collinear "
+            f"with something else in the model, and their rows in the points table "
+            f"will read backwards. See the late_code_flag note in config.py."
+        )
+
     return Scorecard(binner, model), binner
 
 
@@ -189,6 +204,22 @@ def main(argv=None) -> int:
     )
     print(f"\nwrote {args.out.relative_to(ROOT)} "
           f"({args.out.stat().st_size / 1024:.0f} KB)")
+
+    # The JSON export is what the API serves. The pickle above stays for
+    # analysis work that wants the fitted objects back; the service never reads
+    # it, so no sklearn version has to match across the container boundary.
+    spec_path = args.out.with_name("scorecard.json")
+    serving.export(card, spec_path, metrics={"test": m_te,
+                                             "cv_auc_mean": float(cv_scores.mean())})
+    model = serving.ScoringModel.from_json(spec_path)
+    applicants = serving.frame_to_applicants(X_te, card.features)
+    json_scores = np.array([model.score(a) for a in applicants])
+    max_drift = float(np.max(np.abs(json_scores - card.score(X_te).to_numpy())))
+    if max_drift > 1e-6:
+        raise RuntimeError(f"json scorer drifts from the model by {max_drift}")
+    print(f"wrote {spec_path.relative_to(ROOT)} "
+          f"({spec_path.stat().st_size / 1024:.0f} KB), "
+          f"reproduces the model to {max_drift:.2e} points")
 
     report = args.out.with_suffix(".metrics.json")
     report.write_text(json.dumps({"train": m_tr, "test": m_te,

@@ -1,0 +1,5 @@
+# The scoring service reads a JSON lookup table, so none of the training stack
+# is needed here: no sklearn, no pandas, no numpy.
+fastapi==0.137.1
+uvicorn[standard]==0.49.0
+pydantic==2.13.4
