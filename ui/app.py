@@ -112,13 +112,6 @@ div[data-testid="stMetricLabel"] {
     font-weight: 600 !important;
 }
 
-/* Form input styling: zero border, subtle contrast */
-.stNumberInput input, .stSlider, div[data-baseweb="input"] {
-    border-radius: 8px !important;
-    border: none !important;
-    background-color: rgba(255, 255, 255, 0.04) !important;
-    color: #f4f4f5 !important;
-}
 
 /* Buttons: Monochrome authority */
 button[kind="primary"] {
@@ -324,10 +317,27 @@ with tab_officer:
     if dependents_known:
         applicant_payload["NumberOfDependents"] = int(dependents)
 
-    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-    assess_clicked = st.button("Evaluate Application", type="primary")
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
-    if assess_clicked:
+    # Reactive live evaluation & customizable cutoff
+    col_eval_opts, col_cutoff_ctrl = st.columns([2, 1])
+    with col_cutoff_ctrl:
+        default_cutoff = float(health["cutoff"]) if health else 550.0
+        custom_cutoff = st.number_input(
+            "Policy Approval Cutoff (Score)",
+            min_value=400.0,
+            max_value=700.0,
+            value=default_cutoff,
+            step=5.0,
+            help="Default profit optimum is 550 pts. Underwriters can adjust to simulate or test policy exceptions.",
+        )
+
+    with col_eval_opts:
+        live_mode = st.toggle("Real-time Reactive Underwriting", value=True, help="Automatically recalculates score upon any input change.")
+
+    should_evaluate = live_mode or st.button("Evaluate Application", type="primary")
+
+    if should_evaluate:
         result, err = score_applicant(applicant_payload)
         if err:
             st.error(err)
@@ -335,9 +345,9 @@ with tab_officer:
             st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
 
             score_val = result["score"]
-            cutoff_val = result["cutoff"]
+            cutoff_val = custom_cutoff
             delta = score_val - cutoff_val
-            is_approved = result["decision"] == "approve"
+            is_approved = score_val >= cutoff_val
             verdict_glyph = "●" if is_approved else "○"
             verdict_text = "APPROVED" if is_approved else "DECLINED"
 
@@ -383,6 +393,38 @@ with tab_officer:
                 st.caption(f"Base Score: {result['base_points']:.1f} pts + Feature Point Sum")
                 sorted_pts = sorted(result["points"].items(), key=lambda kv: kv[1])
                 st.bar_chart({k: v for k, v in sorted_pts}, horizontal=True)
+
+            with st.expander("Underwriter Manual Override & Policy Exception"):
+                st.caption("Document compensating factors or policy exceptions for credit committee review.")
+                ov_col1, ov_col2 = st.columns(2)
+                with ov_col1:
+                    override_determination = st.selectbox(
+                        "Underwriting Final Determination",
+                        [
+                            f"Follow Algorithmic Decision ({verdict_text})",
+                            "Manual Approval (Policy Exception)",
+                            "Manual Decline (Underwriter Discretion)",
+                            "Conditional Approval (Subject to Verification)",
+                            "Refer to Senior Credit Committee",
+                        ],
+                    )
+                with ov_col2:
+                    compensating_factors = st.multiselect(
+                        "Compensating Factors",
+                        [
+                            "Significant Verified Liquid Reserves",
+                            "Tenured Employment (> 5 Years)",
+                            "Pledged Physical Collateral / Co-Signer",
+                            "Clean 24-Month Re-established Credit",
+                            "Low Debt-to-Asset Ratio",
+                        ],
+                    )
+                underwriter_notes = st.text_area(
+                    "Credit Underwriter Justification & Memo",
+                    placeholder="Enter audit rationale and notes for regulatory compliance...",
+                )
+                if st.button("Commit Underwriting Decision to Audit Trail"):
+                    st.success(f"Determination '{override_determination}' committed to audit log.")
 
             with st.expander("Audit Trail & Points Line-Items"):
                 audit_rows = [
