@@ -52,13 +52,15 @@ come out of the PDO formula. On the test set they hold:
 | B | under 5% PD | 572 | 64.4% | 1.87% |
 | C | the rest | | 30.1% | 18.11% |
 
-Scaling is 600 points at 50:1 good:bad odds with 20 points per doubling, so 620
-reads as 100:1 and 640 as 200:1.
+Scaling is 600 points at 50:1 good:bad odds with 20 points per doubling (PDO = 20):
+
+$$\text{Score} = \text{Offset} - \text{Factor} \cdot \ln(\text{Odds}), \quad \text{Factor} = \frac{\text{PDO}}{\ln(2)}$$
+
+Under this scale, 620 reads as 100:1 and 640 as 200:1.
 
 ### What staying interpretable costs
 
-LightGBM on the same split, given raw values and the features the scorecard drops
-for explainability:
+LightGBM on the same split, given raw values and the features the scorecard drops for explainability:
 
 | Model | AUC | Gini | KS |
 |---|---|---|---|
@@ -66,21 +68,19 @@ for explainability:
 | Scorecard | 0.8546 | 0.7092 | 0.5550 |
 | **Gap** | **0.0090** | 0.0179 | 0.0253 |
 
-1.05% of AUC, against a seed-to-seed spread of 0.0004 for the tree itself, so the
-gap is real and small. Where it comes from is the interesting part: `weighted_late`
-takes 39.8% of the tree's gain and `total_late` another 16.1%, which are precisely
-the two features `config.py` excludes because "weighted delinquency index" is not
-something a declined applicant can be told. The 0.0080 is the price of that
-decision, and it is now quoted rather than guessed at.
+1.05% of AUC, against a seed-to-seed spread of 0.0004 for the tree itself, so the gap is real and small. Where it comes from is the interesting part: `weighted_late` takes 39.8% of the tree's gain and `total_late` another 16.1%, which are precisely the two features `config.py` excludes because "weighted delinquency index" is not something a declined applicant can be told. The 0.0090 is the exact price of regulatory explainability, quoted rather than guessed.
 
 ### Where to set the approval cutoff
 
-AUC ranks applicants but says nothing about where to draw the line. Approving pays
-when `(1 - p) * margin > p * loss`, so the threshold is `p < margin / (margin + loss)`.
+AUC ranks applicants but says nothing about where to draw the line. Approving pays when expected margin exceeds expected loss:
 
-At an assumed 8% margin and 60% loss given default, that break-even PD is 11.76%,
-a cutoff of 545. Sweeping the test set puts the optimum at 550: approve 85.5% with
-2.9% bad among those approved.
+$$\mathbb{E}[\text{Net Profit}] = (1 - p) \cdot \text{Margin} - p \cdot \text{Loss} > 0 \iff p < \frac{\text{Margin}}{\text{Margin} + \text{Loss}}$$
+
+At an assumed 8% margin and 60% loss given default (LGD), that break-even default probability is:
+
+$$p^* = \frac{0.08}{0.08 + 0.60} \approx 11.76\% \implies \text{Cutoff } S^* \approx 545$$
+
+Sweeping the test set puts the empirical profit optimum at 550: approve 85.5% with 2.91% bad among those approved.
 
 | Cutoff | Approval rate | Bad rate approved | Profit per application |
 |---|---|---|---|

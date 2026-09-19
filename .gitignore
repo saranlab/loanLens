@@ -43,15 +43,20 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # ----------------------
 # Logs
 # ----------------------
 logs/*
 !logs/.gitkeep
+*.log
 
 # ----------------------
 # System files
 # ----------------------
 .DS_Store
 Thumbs.db
+
