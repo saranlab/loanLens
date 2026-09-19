@@ -98,6 +98,20 @@ def fit_scorecard(X_tr: pd.DataFrame, y_tr: pd.Series) -> tuple[Scorecard, WoEBi
     # large C because the features are already WoE encoded and few in number.
     model = LogisticRegression(C=1.0, max_iter=1000, random_state=cfg.RANDOM_STATE)
     model.fit(woe_tr, y_tr)
+
+    # WoE is ln(good/bad), so a higher value means safer and every coefficient
+    # must be negative. A positive one means two features are encoding the same
+    # thing and the fit has split the effect between them with opposite signs.
+    # The total still comes out right, which is why this needs an explicit check:
+    # the damage lands in the points table rather than in the metrics.
+    positive = {f: float(c) for f, c in zip(binner.features_, model.coef_.ravel()) if c > 0}
+    if positive:
+        raise ValueError(
+            f"positive WoE coefficients: {positive}. These features are collinear "
+            f"with something else in the model, and their rows in the points table "
+            f"will read backwards. See the late_code_flag note in config.py."
+        )
+
     return Scorecard(binner, model), binner
 
 

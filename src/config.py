@@ -85,8 +85,28 @@ MODEL_FEATURES = [
     "debt_ratio",
     "NumberRealEstateLoansOrLines",
     "NumberOfDependents",
-    "late_code_flag",
 ]
+
+# late_code_flag is deliberately absent, despite a usable univariate IV of 0.039.
+#
+# clean() sets the flag on exactly the rows where all three counters become NaN,
+# so it is perfectly collinear with "every counter is missing", which the
+# counters' own missing bins already encode. Fit together, the logistic splits
+# the effect between them and the flag's coefficient comes out *positive*: its
+# bin for flag=1 was carrying +68 points, telling anyone reading the points table
+# that belonging to a group with a 54.7% bad rate earns you points. The total
+# came out right, because the counters' missing bins carried -118 between them,
+# but the attribution was nonsense.
+#
+# That breaks the rule this scorecard exists for: a row has to be explainable to
+# the applicant it is used against. Worse, since an API payload can never carry
+# a 96/98 code, every real applicant sat in the flag=0 bin and therefore appeared
+# to "lose 68 points" on it, which made it the top adverse action reason for
+# everybody.
+#
+# Dropping it costs 0.0010 AUC and 0.0033 KS. Sentinel rows are still priced
+# correctly without it, scoring a median of 422 against 592 for the book.
+# Keep the flag in the data for tree models and for monitoring; just not here.
 
 # Haldane correction, so a bin with no bads gives a finite WoE instead of -inf.
 WOE_EPS = 0.5
