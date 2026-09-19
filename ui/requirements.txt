@@ -1,0 +1,3 @@
+# The UI holds no model and does no arithmetic. It asks the API and renders.
+streamlit==1.64.0
+requests==2.34.2

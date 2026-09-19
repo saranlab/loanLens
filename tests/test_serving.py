@@ -208,3 +208,41 @@ class TestScoringBehaviour:
 
 def _reject(constant):
     raise ValueError(f"non-JSON constant in export: {constant}")
+
+
+class TestServingHasNoTrainingDependencies:
+    """src/scoring.py is what the API container runs, and it must stay light.
+
+    Asserted rather than intended: an import added here without thinking would
+    pull numpy or pandas into the image and couple the service to library
+    versions it has no reason to care about.
+    """
+
+    def test_imports_only_the_standard_library(self):
+        import ast
+        import pathlib
+        import sys
+
+        source = (pathlib.Path(__file__).parents[1] / "src" / "scoring.py").read_text(
+            encoding="utf-8"
+        )
+        imported = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                imported |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    pytest.fail(f"src/scoring.py must not import from the package: {node.module}")
+                if node.module:
+                    imported.add(node.module.split(".")[0])
+
+        outside = imported - set(sys.stdlib_module_names) - {"__future__"}
+        assert not outside, f"src/scoring.py must stay dependency-free, found {outside}"
+
+    def test_scoring_model_is_importable_without_the_package(self):
+        """Importing it must not drag config, binning or scorecard along."""
+        import importlib
+
+        module = importlib.import_module("src.scoring")
+        assert hasattr(module, "ScoringModel")
+        assert not hasattr(module, "cfg")

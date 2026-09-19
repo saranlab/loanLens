@@ -21,7 +21,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from api.schemas import Applicant, Decision, Health
-from src.serving import ScoringModel
+from src.scoring import ScoringModel
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = Path(os.environ.get("SCORECARD_PATH", ROOT / "artifacts" / "scorecard.json"))

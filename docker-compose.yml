@@ -1,0 +1,51 @@
+# Two services, one network.
+#
+#   docker compose up --build
+#   ui  http://localhost:8501
+#   api http://localhost:8000/docs
+#
+# The artifact is mounted rather than baked into the image. A scorecard is data,
+# not code: retraining should not mean rebuilding a container, and the image
+# should not carry a copy of a model that may already be stale.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Read-only: the service has no business writing to the model it serves.
+      - ./artifacts:/app/artifacts:ro
+    environment:
+      SCORECARD_PATH: /app/artifacts/scorecard.json
+      # The approval line is a business input, so it belongs in configuration
+      # rather than in the image. 550 is the profit optimum from src/policy.py.
+      APPROVAL_CUTOFF: "550"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      # Not localhost. Inside the ui container localhost is the ui container, so
+      # the request would never leave it. Compose gives every service a DNS name,
+      # and `api` resolves to the other container on this network.
+      API_URL: http://api:8000
+    depends_on:
+      api:
+        # depends_on alone only waits for the container to start, which for a
+        # service means "the process launched", not "it can answer". Waiting on
+        # the healthcheck is what makes the UI's first request succeed.
+        condition: service_healthy
+    restart: unless-stopped
